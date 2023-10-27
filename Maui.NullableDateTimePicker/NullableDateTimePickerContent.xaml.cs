@@ -56,25 +56,22 @@ public partial class NullableDateTimePickerContent : ContentView
 
     internal void InitCalendar()
     {
-        Task.Run(async () =>
+        try
         {
-            try
-            {
-                await InitContent();
+            InitContent();
 
-                PopulatePickers();
+            PopulatePickers();
 
-                BuildCalendar();
-            }
-            catch (Exception ex)
-            {
-                Console.Write($"BuildCalendar-Error: {ex}");
-            }
-            finally
-            {
+            BuildCalendar();
+        }
+        catch (Exception ex)
+        {
+            Console.Write($"BuildCalendar-Error: {ex}");
+        }
+        finally
+        {
 
-            }
-        });
+        }
     }
 
     internal DateTime? SelectedDate
@@ -194,180 +191,174 @@ public partial class NullableDateTimePickerContent : ContentView
 
     private void BuildCalendar()
     {
-        Task.Run(() =>
+
+        CalendarActivityIndicator.IsVisible = true;
+        CalendarActivityIndicator.IsRunning = true;
+
+        _daysGrid.Clear();
+
+        if (!_options.ShowWeekNumbers)
+            _daysGrid.ColumnDefinitions[0].Width = 0;
+
+        if (_currentDate > _minDate)
+            _previousMonthButton.IsVisible = true;
+        else
+            _previousMonthButton.IsVisible = false;
+
+        if (_currentDate <= _maxDate)
+            _nextMonthButton.IsVisible = true;
+        else
+            _nextMonthButton.IsVisible = false;
+
+        // Get the first day of the month and the number of days in the month
+        DayOfWeek firstDayOfMonth = new DateTime(_currentDate.Year, _currentDate.Month, 1).DayOfWeek;
+        int daysInMonth = DateTime.DaysInMonth(_currentDate.Year, _currentDate.Month);
+
+        // Get the DateTimeFormatInfo for the current culture
+        DateTimeFormatInfo dateTimeFormatInfo = CultureInfo.CurrentUICulture.DateTimeFormat;
+        string[] dayNames = dateTimeFormatInfo.AbbreviatedDayNames;
+        int firstDayOfWekkIndex = (int)dateTimeFormatInfo.FirstDayOfWeek;
+
+        // Calculate the week number for this day
+
+
+        // Rotate the array so that the first day of the week comes first
+        string[] rotatedDayNames = dayNames.Skip(firstDayOfWekkIndex)
+                                           .Concat(dayNames.Take(firstDayOfWekkIndex))
+                                           .ToArray();
+
+        var dayLabels = new List<Label>();
+        // Add the day labels to the top row of the grid
+        for (int i = 0; i < rotatedDayNames.Length; i++)
         {
-            MainThreadHelper.SafeBeginInvokeOnMainThread(() =>
+            string dayName = rotatedDayNames[i];
+
+            Label label = new()
             {
-                CalendarActivityIndicator.IsVisible = true;
-                CalendarActivityIndicator.IsRunning = true;
-
-                _daysGrid.Clear();
-
-                if (!_options.ShowWeekNumbers)
-                    _daysGrid.ColumnDefinitions[0].Width = 0;
-
-                if (_currentDate > _minDate)
-                    _previousMonthButton.IsVisible = true;
-                else
-                    _previousMonthButton.IsVisible = false;
-
-                if (_currentDate <= _maxDate)
-                    _nextMonthButton.IsVisible = true;
-                else
-                    _nextMonthButton.IsVisible = false;
-            });
-
-            // Get the first day of the month and the number of days in the month
-            DayOfWeek firstDayOfMonth = new DateTime(_currentDate.Year, _currentDate.Month, 1).DayOfWeek;
-            int daysInMonth = DateTime.DaysInMonth(_currentDate.Year, _currentDate.Month);
-
-            // Get the DateTimeFormatInfo for the current culture
-            DateTimeFormatInfo dateTimeFormatInfo = CultureInfo.CurrentUICulture.DateTimeFormat;
-            string[] dayNames = dateTimeFormatInfo.AbbreviatedDayNames;
-            int firstDayOfWekkIndex = (int)dateTimeFormatInfo.FirstDayOfWeek;
-
-            // Calculate the week number for this day
+                Text = dayName,
+                Style = _options.DayNamesStyle ?? _dayNamesStyle as Style
+            };
+            dayLabels.Add(label);
+        }
 
 
-            // Rotate the array so that the first day of the week comes first
-            string[] rotatedDayNames = dayNames.Skip(firstDayOfWekkIndex)
-                                               .Concat(dayNames.Take(firstDayOfWekkIndex))
-                                               .ToArray();
+        for (int i = 0; i < dayLabels.Count; i++)
+        {
+            _daysGrid.Add(dayLabels[i], i + 1, 0);
+        }
 
-            var dayLabels = new List<Label>();
-            // Add the day labels to the top row of the grid
-            for (int i = 0; i < rotatedDayNames.Length; i++)
+        int row = 1;
+        int col = ((int)firstDayOfMonth - firstDayOfWekkIndex + 7) % 7;
+
+        // Fill the day grid with buttons for each day of the month
+        for (int day = 1; day <= daysInMonth; day++)
+        {
+            var dayButton = _dayButtons[^day];
+            _daysGrid.Add(dayButton, col + 1, row);
+
+            col++;
+
+            if (col > 6)
             {
-                string dayName = rotatedDayNames[i];
+                col = 0;
+                row++;
+            }
+        }
 
-                Label label = new()
+        // week numbers
+        if (_options.ShowWeekNumbers)
+        {
+            // Calculate the number of weeks in the current year
+            int weeksInYear = CultureInfo.CurrentCulture.Calendar.GetWeekOfYear(_currentDate, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday) == 53 ? 53 : 52;
+
+            // Calculate the week number for the first day of the current month
+            int weekNumber = GetIso8601WeekOfYear(new DateTime(_currentDate.Year, _currentDate.Month, 1));
+
+            for (int weekRow = 1; weekRow <= 6; weekRow++)
+            {
+                // Add the week number label to the grid
+                _daysGrid.Add(new Label { Text = weekNumber.ToString(), Style = _weekNumberStyle }, 0, weekRow);
+
+                // Move to the next day
+                weekNumber++;
+
+                // If we have reached the end of the year, reset the week number to 1
+                if (weekNumber > weeksInYear)
+                    weekNumber = 1;
+
+                // If we are on the last row and the last day is in the next year, set the week number to 1 for the next year
+                if (weekRow == 6
+        && DateTime.DaysInMonth(_currentDate.Year, _currentDate.Month) >= 28
+        && weekNumber != GetIso8601WeekOfYear(new DateTime(_currentDate.Year, _currentDate.Month, DateTime.DaysInMonth(_currentDate.Year, _currentDate.Month))))
+                    weekNumber = 1;
+            }
+        }
+
+        // other month days
+        if (_options.ShowOtherMonthDays)
+        {
+            var lastMonthDate = new DateTime(_currentDate.Year, _currentDate.Month, 1).AddMonths(-1);
+            int daysInLastMonth = DateTime.DaysInMonth(lastMonthDate.Year, lastMonthDate.Month);
+            // Fill in days for the last month
+            int daysNeededFromLastMonth = ((int)firstDayOfMonth - firstDayOfWekkIndex + 7) % 7;
+            for (int i = daysNeededFromLastMonth - 1; i >= 0; i--)
+            {
+                Button lastMonthDayButton = new()
                 {
-                    Text = dayName,
-                    Style = _options.DayNamesStyle ?? _dayNamesStyle as Style
+                    Text = (daysInLastMonth - i).ToString(),
+                    Style = _otherMonthDayStyle
                 };
-                dayLabels.Add(label);
+                lastMonthDayButton.Clicked += OnLastMonthDayButtonTapped;
+
+                _daysGrid.Add(lastMonthDayButton, daysNeededFromLastMonth - i, 1); //the first column of the grid is for the week numbers
             }
 
-            MainThreadHelper.SafeBeginInvokeOnMainThread(() =>
+
+            DateTime firstDayOfNextMonth = new DateTime(_currentDate.Year, _currentDate.Month, 1).AddMonths(1);
+            int daysInNextMonth = DateTime.DaysInMonth(firstDayOfNextMonth.Year, firstDayOfNextMonth.Month);
+            int lastWeekLastDayIndex = ((int)firstDayOfNextMonth.DayOfWeek - 1 + 7) % 7;
+
+            for (int i = 0; i < 6 * 7 - daysInMonth - daysNeededFromLastMonth; i++)
             {
-                for (int i = 0; i < dayLabels.Count; i++)
+                Button nextMonthDayButton = new()
                 {
-                    _daysGrid.Add(dayLabels[i], i + 1, 0);
-                }
+                    Text = (i + 1).ToString(),
+                    Style = _otherMonthDayStyle
+                };
+                nextMonthDayButton.Clicked += OnNextMonthDayButtonTapped;
 
-                int row = 1;
-                int col = ((int)firstDayOfMonth - firstDayOfWekkIndex + 7) % 7;
+                int nextDayRow = (daysNeededFromLastMonth + daysInMonth + i) / 7 + 1; //Add 1 because the first row is for day names
+                int nextDayCol = (daysNeededFromLastMonth + daysInMonth + i) % 7 + 1; //Add 1 because the first column is for week numbers
 
-                // Fill the day grid with buttons for each day of the month
-                for (int day = 1; day <= daysInMonth; day++)
-                {
-                    var dayButton = _dayButtons[^day];
-                    _daysGrid.Add(dayButton, col + 1, row);
+                _daysGrid.Add(nextMonthDayButton, nextDayCol, nextDayRow);
+            }
 
-                    col++;
+        }
 
-                    if (col > 6)
-                    {
-                        col = 0;
-                        row++;
-                    }
-                }
+        //If the days from the previous or next month are not being displayed and the last row is empty, it should not be shown.
+        // Check if the last row is empty
+        bool lastRowEmpty = true;
+        for (int i = 1; i <= 7; i++)
+        {
+            Button lastButton = _daysGrid.Children.LastOrDefault(c => _daysGrid.GetRow(c) == 6 && _daysGrid.GetColumn(c) == i) as Button;
+            if (lastButton != null && !string.IsNullOrEmpty(lastButton.Text))
+            {
+                lastRowEmpty = false;
+                break;
+            }
+        }
 
-                // week numbers
-                if (_options.ShowWeekNumbers)
-                {
-                    // Calculate the number of weeks in the current year
-                    int weeksInYear = CultureInfo.CurrentCulture.Calendar.GetWeekOfYear(_currentDate, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday) == 53 ? 53 : 52;
+        // If the last row is empty, set its height to 0
+        if (lastRowEmpty)
+        {
+            _daysGrid.RowDefinitions[6].Height = new GridLength(0);
+        }
 
-                    // Calculate the week number for the first day of the current month
-                    int weekNumber = GetIso8601WeekOfYear(new DateTime(_currentDate.Year, _currentDate.Month, 1));
+        UpdateCurrentDateAndControls(_currentDate);
 
-                    for (int weekRow = 1; weekRow <= 6; weekRow++)
-                    {
-                        // Add the week number label to the grid
-                        _daysGrid.Add(new Label { Text = weekNumber.ToString(), Style = _weekNumberStyle }, 0, weekRow);
+        CalendarActivityIndicator.IsVisible = false;
+        CalendarActivityIndicator.IsRunning = false;
 
-                        // Move to the next day
-                        weekNumber++;
-
-                        // If we have reached the end of the year, reset the week number to 1
-                        if (weekNumber > weeksInYear)
-                            weekNumber = 1;
-
-                        // If we are on the last row and the last day is in the next year, set the week number to 1 for the next year
-                        if (weekRow == 6
-                        && DateTime.DaysInMonth(_currentDate.Year, _currentDate.Month) >= 28
-                        && weekNumber != GetIso8601WeekOfYear(new DateTime(_currentDate.Year, _currentDate.Month, DateTime.DaysInMonth(_currentDate.Year, _currentDate.Month))))
-                            weekNumber = 1;
-                    }
-                }
-
-                // other month days
-                if (_options.ShowOtherMonthDays)
-                {
-                    var lastMonthDate = new DateTime(_currentDate.Year, _currentDate.Month, 1).AddMonths(-1);
-                    int daysInLastMonth = DateTime.DaysInMonth(lastMonthDate.Year, lastMonthDate.Month);
-                    // Fill in days for the last month
-                    int daysNeededFromLastMonth = ((int)firstDayOfMonth - firstDayOfWekkIndex + 7) % 7;
-                    for (int i = daysNeededFromLastMonth - 1; i >= 0; i--)
-                    {
-                        Button lastMonthDayButton = new()
-                        {
-                            Text = (daysInLastMonth - i).ToString(),
-                            Style = _otherMonthDayStyle
-                        };
-                        lastMonthDayButton.Clicked += OnLastMonthDayButtonTapped;
-
-                        _daysGrid.Add(lastMonthDayButton, daysNeededFromLastMonth - i, 1); //the first column of the grid is for the week numbers
-                    }
-
-
-                    DateTime firstDayOfNextMonth = new DateTime(_currentDate.Year, _currentDate.Month, 1).AddMonths(1);
-                    int daysInNextMonth = DateTime.DaysInMonth(firstDayOfNextMonth.Year, firstDayOfNextMonth.Month);
-                    int lastWeekLastDayIndex = ((int)firstDayOfNextMonth.DayOfWeek - 1 + 7) % 7;
-
-                    for (int i = 0; i < 6 * 7 - daysInMonth - daysNeededFromLastMonth; i++)
-                    {
-                        Button nextMonthDayButton = new()
-                        {
-                            Text = (i + 1).ToString(),
-                            Style = _otherMonthDayStyle
-                        };
-                        nextMonthDayButton.Clicked += OnNextMonthDayButtonTapped;
-
-                        int nextDayRow = (daysNeededFromLastMonth + daysInMonth + i) / 7 + 1; //Add 1 because the first row is for day names
-                        int nextDayCol = (daysNeededFromLastMonth + daysInMonth + i) % 7 + 1; //Add 1 because the first column is for week numbers
-
-                        _daysGrid.Add(nextMonthDayButton, nextDayCol, nextDayRow);
-                    }
-
-                }
-
-                //If the days from the previous or next month are not being displayed and the last row is empty, it should not be shown.
-                // Check if the last row is empty
-                bool lastRowEmpty = true;
-                for (int i = 1; i <= 7; i++)
-                {
-                    Button lastButton = _daysGrid.Children.LastOrDefault(c => _daysGrid.GetRow(c) == 6 && _daysGrid.GetColumn(c) == i) as Button;
-                    if (lastButton != null && !string.IsNullOrEmpty(lastButton.Text))
-                    {
-                        lastRowEmpty = false;
-                        break;
-                    }
-                }
-
-                // If the last row is empty, set its height to 0
-                if (lastRowEmpty)
-                {
-                    _daysGrid.RowDefinitions[6].Height = new GridLength(0);
-                }
-
-                UpdateCurrentDateAndControls(_currentDate);
-
-                CalendarActivityIndicator.IsVisible = false;
-                CalendarActivityIndicator.IsRunning = false;
-            });
-        });
     }
 
 
@@ -387,42 +378,37 @@ public partial class NullableDateTimePickerContent : ContentView
     private void UpdateCurrentDateAndControls(DateTime? date)
     {
         _currentDate = date ?? DateTime.Now;
-        Console.Write($"UpdateCurrentDate: {_currentDate.ToString()}");
-        MainThreadHelper.SafeBeginInvokeOnMainThread(() =>
+
+        _yearsPicker.SelectedItem = _currentDate.Year;
+        if (_options.PickerMode != PickerMode.Date)
         {
-            _yearsPicker.SelectedItem = _currentDate.Year;
-            if (_options.PickerMode != PickerMode.Date)
-            {
-                _hoursPicker.SelectedItem = string.Format("{0:D2}", _currentDate.Hour);
-                _minutesPicker.SelectedItem = string.Format("{0:D2}", _currentDate.Minute);
-            }
-            _monthYearLabel.Text = _currentDate.ToString("MMMM yyyy");
-            _selectedDateLabel.Text = date.HasValue ? date.Value.ToString("ddd, MMM d") : "No Date Selected";
-            SetCurrentDayStyle(_currentDate.Day.ToString());
-        });
+            _hoursPicker.SelectedItem = string.Format("{0:D2}", _currentDate.Hour);
+            _minutesPicker.SelectedItem = string.Format("{0:D2}", _currentDate.Minute);
+        }
+        _monthYearLabel.Text = _currentDate.ToString("MMMM yyyy");
+        _selectedDateLabel.Text = date.HasValue ? date.Value.ToString("ddd, MMM d") : "No Date Selected";
+        SetCurrentDayStyle(_currentDate.Day.ToString());
+
     }
 
     Button lastClickedDayButton = null;
     private void SetCurrentDayStyle(string day)
     {
-        MainThreadHelper.SafeBeginInvokeOnMainThread(() =>
-        {
-            if (lastClickedDayButton != null)
-                lastClickedDayButton.Style = _dayStyle as Style;
+        if (lastClickedDayButton != null)
+            lastClickedDayButton.Style = _dayStyle as Style;
 
-            foreach (var child in _dayButtons)
+        foreach (var child in _dayButtons)
+        {
+            if (child is Button button)
             {
-                if (child is Button button)
+                if (button.Text == day)
                 {
-                    if (button.Text == day)
-                    {
-                        button.Style = _selectedDayStyle as Style;
-                        lastClickedDayButton = button;
-                        break;
-                    }
+                    button.Style = _selectedDayStyle as Style;
+                    lastClickedDayButton = button;
+                    break;
                 }
             }
-        });
+        }
     }
 
     private void PopulatePickers()
@@ -456,14 +442,12 @@ public partial class NullableDateTimePickerContent : ContentView
             minutes.Add("00");
         }
 
-        MainThreadHelper.SafeBeginInvokeOnMainThread(() =>
-        {
-            _yearsPicker.ItemsSource = years;
-            if (_hoursPicker != null)
-                _hoursPicker.ItemsSource = hours;
-            if (_minutesPicker != null)
-                _minutesPicker.ItemsSource = minutes;
-        });
+        _yearsPicker.ItemsSource = years;
+        if (_hoursPicker != null)
+            _hoursPicker.ItemsSource = hours;
+        if (_minutesPicker != null)
+            _minutesPicker.ItemsSource = minutes;
+
     }
 
     internal void OnClearButtonClicked(object sender, EventArgs e)
@@ -542,7 +526,7 @@ public partial class NullableDateTimePickerContent : ContentView
         UpdateCurrentDateAndControls(new DateTime(_currentDate.Year, _currentDate.Month, _currentDate.Day, _currentDate.Hour, minute, _currentDate.Second));
     }
 
-    private async Task InitContent()
+    private void InitContent()
     {
         #region Styles
         // DayStyle
@@ -769,7 +753,6 @@ public partial class NullableDateTimePickerContent : ContentView
 
         _calendarGrid.Add(preNextButtonsGrid, 0, 1);
 
-
         #region days
         _daysGrid = new Grid
         {
@@ -793,7 +776,6 @@ public partial class NullableDateTimePickerContent : ContentView
         _calendarGrid.Add(_daysGrid, 0, 2);
 
         #endregion // days
-
 
         #region Time row
         if (_options.PickerMode != PickerMode.Date)
@@ -852,7 +834,6 @@ public partial class NullableDateTimePickerContent : ContentView
         }
         #endregion // Time row
 
-
         #region ToolButtons row
         Grid toolButtonsGrid = new Grid
         {
@@ -907,9 +888,6 @@ public partial class NullableDateTimePickerContent : ContentView
         _calendarGrid.Add(toolButtonsGrid, 0, 4);
         #endregion //Tool buttons row
 
-        await MainThreadHelper.SafeInvokeOnMainThreadAsync((Action)(() =>
-        {
-            this.MainGrid.Add((IView)this._calendarGrid);
-        }));
+        this.MainGrid.Add((IView)this._calendarGrid);
     }
 }
